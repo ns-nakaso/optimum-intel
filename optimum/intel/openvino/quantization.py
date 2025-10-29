@@ -817,17 +817,22 @@ class OVCalibrationDatasetBuilder:
             num_samples = config.num_samples or 32
             dataset = list(tqdm(dataset.take(num_samples), desc="Downloading audio inputs", total=num_samples))
 
+            is_decoder_stateful = self.model.components["decoder"].stateful
             for item in tqdm(dataset, desc="Collecting calibration data"):
                 audio = item["audio"]["array"]
                 sampling_rate = item["audio"]["sampling_rate"]
                 input_features = processor(audio, sampling_rate=sampling_rate, return_tensors="pt").input_features
+                last_decoder_sample_id = len(collected_inputs["decoder"])
                 self.model.generate(input_features)
+                if is_decoder_stateful:
+                    collected_inputs["decoder"][last_decoder_sample_id]["reset_state"] = True
         finally:
             for model in self.model.components.values():
                 model.request = model.request.request
 
         for ov_model_name in collected_inputs:
-            collected_inputs[ov_model_name] = nncf.Dataset(collected_inputs[ov_model_name])
+            reset_engine_state = False if ov_model_name == "decoder" and is_decoder_stateful else None
+            collected_inputs[ov_model_name] = nncf.Dataset(collected_inputs[ov_model_name], reset_engine_state=reset_engine_state)
 
         return OVCalibrationDataset(collected_inputs)
 
