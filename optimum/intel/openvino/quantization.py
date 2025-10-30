@@ -167,14 +167,26 @@ class InferRequestWrapper:
         self.apply_caching = apply_caching
         self.inference_result_mock = inference_result_mock
         self.tensor_cache = {}
+        self.stateful = len(request.query_state()) > 0
+        self._reset_state_called = False
 
     def collect_inputs(self, inputs):
+        if self.stateful and not is_nncf_version("<=", "2.19"):
+            if not isinstance(inputs, dict):
+                raise NotImplementedError("Processing of non-dict inputs for stateful models is not supported.")
+            inputs = inputs.copy()
+            inputs[nncf.Dataset.RESET_STATE_KEY] = self._reset_state_called
+            self._reset_state_called = False
+
         if not self.apply_caching or not isinstance(inputs, dict):
             self.collected_inputs.append(copy.deepcopy(inputs))
             return
 
         copied_inputs = {}
         for k, v in inputs.items():
+            if isinstance(v, bool):
+                copied_inputs[k] = v
+                continue
             data = v
             if isinstance(data, openvino.Tensor):
                 data = data.data
@@ -222,6 +234,10 @@ class InferRequestWrapper:
 
     def get_tensor(self, name: str):
         return Tensor(self.request.results[name])
+
+    def reset_state(self):
+        self.request.reset_state()
+        self._reset_state_called = True
 
     def __getattr__(self, attr):
         if attr in self.__dict__:
@@ -817,22 +833,17 @@ class OVCalibrationDatasetBuilder:
             num_samples = config.num_samples or 32
             dataset = list(tqdm(dataset.take(num_samples), desc="Downloading audio inputs", total=num_samples))
 
-            is_decoder_stateful = self.model.components["decoder"].stateful
             for item in tqdm(dataset, desc="Collecting calibration data"):
                 audio = item["audio"]["array"]
                 sampling_rate = item["audio"]["sampling_rate"]
                 input_features = processor(audio, sampling_rate=sampling_rate, return_tensors="pt").input_features
-                last_decoder_sample_id = len(collected_inputs["decoder"])
                 self.model.generate(input_features)
-                if is_decoder_stateful:
-                    collected_inputs["decoder"][last_decoder_sample_id]["reset_state"] = True
         finally:
             for model in self.model.components.values():
                 model.request = model.request.request
 
         for ov_model_name in collected_inputs:
-            reset_engine_state = False if ov_model_name == "decoder" and is_decoder_stateful else None
-            collected_inputs[ov_model_name] = nncf.Dataset(collected_inputs[ov_model_name], reset_engine_state=reset_engine_state)
+            collected_inputs[ov_model_name] = nncf.Dataset(collected_inputs[ov_model_name])
 
         return OVCalibrationDataset(collected_inputs)
 
