@@ -479,6 +479,7 @@ def main_export(
             device=device,
             trust_remote_code=trust_remote_code,
             patch_16bit_model=patch_16bit,
+            library_name=library_name,
             **kwargs_shapes,
         )
 

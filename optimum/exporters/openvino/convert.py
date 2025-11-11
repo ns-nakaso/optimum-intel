@@ -541,6 +541,7 @@ def export_from_model(
     device: str = "cpu",
     trust_remote_code: bool = False,
     patch_16bit_model: bool = False,
+    library_name: Optional[str] = None,
     **kwargs_shapes,
 ):
     model_kwargs = model_kwargs or {}
@@ -550,9 +551,9 @@ def export_from_model(
             f"Compression of the weights to {ov_config.quantization_config} requires nncf, please install it with `pip install nncf`"
         )
 
-    library_name = _infer_library_from_model_or_model_class(model)
+    library_name = _infer_library_from_model_or_model_class(model, library_name=library_name)
     if library_name != "open_clip":
-        TasksManager.standardize_model_attributes(model)
+        TasksManager.standardize_model_attributes(model, library_name=library_name)
 
     if hasattr(model.config, "export_model_type") and model.config.export_model_type is not None:
         model_type = model.config.export_model_type
